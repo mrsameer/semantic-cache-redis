@@ -47,17 +47,38 @@ async def ask_question(request: QueryRequest):
         }
     
     # Cache Miss
-    response = gemini.generate_content(question)
+    # Use the LangGraph agent for generation
+    initial_state = {"messages": [question]}
+    result = agent_app.invoke(initial_state)
+    response_text = result.get("answer", "No answer generated.")
+    grounding_metadata = result.get("grounding_metadata", {})
+    
     end_time = time.time()
     
-    # Store in cache
-    cache.store(question, response)
+    # Store in cache (storing only text for now)
+    cache.store(question, response_text)
     
+    # Process metadata for response
+    processed_metadata = {}
+    if grounding_metadata:
+        try:
+            if hasattr(grounding_metadata, 'web_search_queries'):
+                processed_metadata['web_search_queries'] = grounding_metadata.web_search_queries
+            if hasattr(grounding_metadata, 'grounding_chunks'):
+                chunks = []
+                for chunk in grounding_metadata.grounding_chunks:
+                    if hasattr(chunk, 'web'):
+                        chunks.append({"uri": chunk.web.uri, "title": chunk.web.title})
+                processed_metadata['grounding_chunks'] = chunks
+        except Exception:
+            pass
+
     return {
-        "answer": response,
+        "answer": response_text,
         "latency": end_time - start_time,
         "source": "CACHE_MISS",
-        "similarity": "N/A"
+        "similarity": "N/A",
+        "grounding_metadata": processed_metadata
     }
 
 @app.get("/cache")
@@ -69,3 +90,67 @@ async def get_cache():
 async def clear_cache():
     cache.clear_cache()
     return {"message": "Cache cleared"}
+
+# Agent Integration
+from agent_graph import agent_app
+
+@app.post("/agent/ask")
+async def ask_agent(request: QueryRequest):
+    question = request.question
+    
+    # Invoke the agent
+    # The state expects 'messages' as a list of strings
+    initial_state = {"messages": [question]}
+    result = agent_app.invoke(initial_state)
+    
+    answer = result.get("answer", "No answer generated.")
+    grounding_metadata = result.get("grounding_metadata", {})
+    
+    # Process grounding metadata for JSON response
+    # We need to be careful with the object types from the SDK
+    processed_metadata = {}
+    if grounding_metadata:
+        try:
+            # Extract search queries
+            if hasattr(grounding_metadata, 'web_search_queries'):
+                processed_metadata['web_search_queries'] = grounding_metadata.web_search_queries
+            
+            # Extract chunks
+            if hasattr(grounding_metadata, 'grounding_chunks'):
+                chunks = []
+                for chunk in grounding_metadata.grounding_chunks:
+                    if hasattr(chunk, 'web'):
+                        chunks.append({
+                            "uri": chunk.web.uri,
+                            "title": chunk.web.title
+                        })
+                processed_metadata['grounding_chunks'] = chunks
+            
+            # Extract supports
+            if hasattr(grounding_metadata, 'grounding_supports'):
+                supports = []
+                for support in grounding_metadata.grounding_supports:
+                    support_dict = {}
+                    if hasattr(support, 'segment'):
+                        support_dict['segment'] = {
+                            "text": support.segment.text,
+                            "start_index": support.segment.start_index,
+                            "end_index": support.segment.end_index
+                        }
+                    if hasattr(support, 'grounding_chunk_indices'):
+                        support_dict['grounding_chunk_indices'] = support.grounding_chunk_indices
+                    supports.append(support_dict)
+                processed_metadata['grounding_supports'] = supports
+                
+            # Extract search entry point (HTML)
+            if hasattr(grounding_metadata, 'search_entry_point') and grounding_metadata.search_entry_point:
+                 processed_metadata['search_entry_point'] = grounding_metadata.search_entry_point.rendered_content
+                 
+        except Exception as e:
+            print(f"Error processing metadata: {e}")
+            processed_metadata = {"error": "Failed to process grounding metadata"}
+
+    return {
+        "answer": answer,
+        "grounding_metadata": processed_metadata
+    }

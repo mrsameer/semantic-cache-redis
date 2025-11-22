@@ -30,6 +30,9 @@ Includes a premium, dark-themed **Web Interface** to visualize cache hits, misse
     - Dockerized Redis Stack.
     - Environment-based configuration (`.env`).
     - FastAPI backend with REST endpoints.
+- **🤖 LangGraph Agent**:
+    - Integrated **LangGraph** agent with **Gemini Web Search** (Grounding).
+    - Provides real-time, grounded answers with citations.
 
 ---
 
@@ -139,6 +142,7 @@ Open your browser and navigate to:
 ### API Endpoints
 
 - `POST /ask`: Submit a query.
+- `POST /agent/ask`: Ask the LangGraph agent (with Google Search).
 - `GET /cache`: Retrieve all cached entries.
 - `DELETE /cache`: Clear the cache.
 

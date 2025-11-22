@@ -67,6 +67,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
         similarityScore.textContent = `Similarity: ${data.similarity}`;
 
+        // Display Grounding/Citations if available
+        const existingCitations = document.getElementById('citations');
+        if (existingCitations) existingCitations.remove();
+
+        if (data.grounding_metadata && data.grounding_metadata.grounding_chunks && data.grounding_metadata.grounding_chunks.length > 0) {
+            const citationsDiv = document.createElement('div');
+            citationsDiv.id = 'citations';
+            citationsDiv.className = 'mt-4 p-3 bg-gray-50 rounded text-sm';
+            citationsDiv.innerHTML = '<h4 class="font-semibold mb-2">Sources:</h4>';
+
+            const list = document.createElement('ul');
+            list.className = 'list-disc pl-5';
+            data.grounding_metadata.grounding_chunks.forEach(chunk => {
+                const li = document.createElement('li');
+                li.innerHTML = `<a href="${chunk.uri}" target="_blank" class="text-blue-600 hover:underline">${chunk.title || chunk.uri}</a>`;
+                list.appendChild(li);
+            });
+            citationsDiv.appendChild(list);
+            resultText.parentNode.appendChild(citationsDiv);
+        }
+
         resultCard.classList.remove('hidden');
     }
 
