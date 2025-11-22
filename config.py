@@ -24,3 +24,7 @@ SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", 0.9))
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 3600))
 VECTOR_DIMENSION = int(os.getenv("VECTOR_DIMENSION", 768))
 INDEX_NAME = os.getenv("INDEX_NAME", "semantic_cache_idx")
+
+# Hybrid Search Configuration
+HYBRID_ENABLED = os.getenv("HYBRID_ENABLED", "true").lower() == "true"
+HYBRID_ALPHA = float(os.getenv("HYBRID_ALPHA", 0.7))  # 0.7 = 70% vector, 30% BM25

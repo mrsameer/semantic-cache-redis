@@ -16,12 +16,22 @@ Includes a premium, dark-themed **Web Interface** to visualize cache hits, misse
 
 - **🚀 Semantic Caching**: Uses vector embeddings to understand the *intent* of a query.
     - *Example*: "Tell me the capital of France" matches "What is the capital of France?"
+- **🕒 Time-Aware Caching (TASC)**: Resolves relative time expressions to absolute dates.
+    - *Example*: "Weather today" (Nov 22) and "Weather yesterday" (Nov 21) are distinct cache entries.
+    - Uses `dateparser` to normalize queries like "today", "yesterday", "last Friday" to ISO dates.
+    - Supports composite queries: "Rainfall today and yesterday".
+- **🔍 Metadata Filtering**: Strict date filtering prevents false positives.
+    - *Example*: "Weather today" won't hit "Weather yesterday" even if semantically similar.
+    - Uses Redis TagField for exact date matching.
+- **🎯 Hybrid Search (BM25 + Vector)**: Combines lexical and semantic search for precision.
+    - *Example*: "Rainfall of Hyderabad" won't match "Rainfall of Andhra" despite high semantic similarity.
+    - Configurable balance via `HYBRID_ALPHA` (default: 0.7 = 70% vector, 30% BM25).
 - **⚡ High Performance**:
     - **Cache Hit**: ~0.2s (Redis Vector Search)
     - **Cache Miss**: ~1.5s+ (LLM Generation)
 - **🧠 Advanced AI Models**:
-    - **Embeddings**: `gemini-embedding-001` (3072 dimensions) for high-fidelity semantic understanding.
-    - **Generation**: `gemini-2.5-flash` for fast, accurate responses.
+    - **Embeddings**: `text-embedding-004` (768 dimensions) for semantic understanding.
+    - **Generation**: `gemini-1.5-flash-001` for fast, accurate responses.
 - **🎨 Premium Web UI**:
     - Real-time latency visualization.
     - Visual indicators for Cache Hits (Green) vs Misses (Blue).
@@ -30,9 +40,7 @@ Includes a premium, dark-themed **Web Interface** to visualize cache hits, misse
     - Dockerized Redis Stack.
     - Environment-based configuration (`.env`).
     - FastAPI backend with REST endpoints.
-- **🤖 LangGraph Agent**:
-    - Integrated **LangGraph** agent with **Gemini Web Search** (Grounding).
-    - Provides real-time, grounded answers with citations.
+
 
 ---
 
@@ -104,17 +112,50 @@ PROJECT_ID=your-project-id
 LOCATION=us-central1
 
 # Models
-EMBEDDING_MODEL_ID=gemini-embedding-001
-GENERATION_MODEL_ID=gemini-2.5-flash
+EMBEDDING_MODEL_ID=text-embedding-004
+GENERATION_MODEL_ID=gemini-1.5-flash-001
 
 # Cache Settings
 SIMILARITY_THRESHOLD=0.9
 CACHE_TTL_SECONDS=3600
-VECTOR_DIMENSION=3072
+VECTOR_DIMENSION=768
 INDEX_NAME=semantic_cache_idx
+
+# Hybrid Search (BM25 + Vector)
+HYBRID_ENABLED=true
+HYBRID_ALPHA=0.7  # 0.7 = 70% vector, 30% BM25
 ```
 
-> **Note**: Ensure `VECTOR_DIMENSION` matches your embedding model (3072 for `gemini-embedding-001`).
+> **Note**: Ensure `VECTOR_DIMENSION` matches your embedding model (768 for `text-embedding-004`).
+
+---
+
+## 📚 Advanced Features
+
+### Time-Aware Caching
+
+The system automatically normalizes temporal expressions in queries:
+
+```python
+# Example queries that get normalized:
+"Weather today"           -> "Weather 2025-11-22"
+"Rainfall yesterday"      -> "Rainfall 2025-11-21"
+"Temperature last Friday" -> "Temperature 2025-11-15"
+"Weather today and yesterday" -> Stored with tags: 2025-11-22, 2025-11-21
+```
+
+### Hybrid Search
+
+Hybrid search combines BM25 (keyword matching) with vector similarity to reduce false positives:
+
+- **Pure Vector**: "Rainfall of Hyderabad" matches "Rainfall of Andhra" (0.95 similarity)
+- **Hybrid**: Same query results in **MISS** (BM25 detects different keywords)
+
+Tune the balance with `HYBRID_ALPHA`:
+- `1.0` = Pure vector (semantic only)
+- `0.7` = Default (70% semantic, 30% keyword)
+- `0.5` = Balanced
+- `0.0` = Pure BM25 (keyword only)
 
 ---
 

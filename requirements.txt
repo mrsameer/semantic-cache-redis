@@ -4,6 +4,8 @@ google-genai
 numpy
 fastapi
 uvicorn
-python-multipart
+python-dotenv
+pydantic
 langgraph
+dateparser
 langchain-core
