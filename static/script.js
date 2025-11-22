@@ -12,6 +12,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshCacheBtn = document.getElementById('refreshCacheBtn');
     const clearCacheBtn = document.getElementById('clearCacheBtn');
 
+    let currentAnswer = '';
+    let latestMetadata = null;
+    let shouldRefreshCache = false;
+
     // Load cache on startup
     fetchCache();
 
@@ -27,28 +31,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const question = questionInput.value.trim();
         if (!question) return;
 
-        // UI State: Loading
+        resetResultCard();
+
         loadingIndicator.classList.remove('hidden');
-        resultCard.classList.add('hidden');
         askBtn.disabled = true;
 
         try {
-            const response = await fetch('/ask', {
+            const response = await fetch('/ask/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question })
             });
 
-            const data = await response.json();
-
-            // Update UI with Result
-            displayResult(data);
-
-            // Refresh cache list if it was a miss (new item added)
-            if (data.source === 'CACHE_MISS') {
-                fetchCache();
+            if (!response.ok) {
+                throw new Error('Failed to get response from server');
             }
 
+            await readStream(response);
         } catch (error) {
             console.error('Error:', error);
             alert('Failed to get response');
@@ -58,37 +57,106 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function displayResult(data) {
-        resultText.innerHTML = formatMarkdown(data.answer);
-        resultLatency.textContent = `${data.latency.toFixed(4)}s`;
+    function resetResultCard() {
+        currentAnswer = '';
+        latestMetadata = null;
+        shouldRefreshCache = false;
+        resultText.textContent = '';
+        resultLatency.textContent = '...';
+        similarityScore.textContent = 'Similarity: --';
+        resultSource.textContent = 'Waiting...';
+        resultSource.className = 'source-badge';
+        clearCitations();
+        resultCard.classList.add('hidden');
+    }
 
-        resultSource.textContent = data.source.replace('_', ' ');
-        resultSource.className = 'source-badge ' + (data.source === 'CACHE_HIT' ? 'hit' : 'miss');
+    async function readStream(response) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-        similarityScore.textContent = `Similarity: ${data.similarity}`;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
 
-        // Display Grounding/Citations if available
-        const existingCitations = document.getElementById('citations');
-        if (existingCitations) existingCitations.remove();
-
-        if (data.grounding_metadata && data.grounding_metadata.grounding_chunks && data.grounding_metadata.grounding_chunks.length > 0) {
-            const citationsDiv = document.createElement('div');
-            citationsDiv.id = 'citations';
-            citationsDiv.className = 'mt-4 p-3 bg-gray-50 rounded text-sm';
-            citationsDiv.innerHTML = '<h4 class="font-semibold mb-2">Sources:</h4>';
-
-            const list = document.createElement('ul');
-            list.className = 'list-disc pl-5';
-            data.grounding_metadata.grounding_chunks.forEach(chunk => {
-                const li = document.createElement('li');
-                li.innerHTML = `<a href="${chunk.uri}" target="_blank" class="text-blue-600 hover:underline">${chunk.title || chunk.uri}</a>`;
-                list.appendChild(li);
-            });
-            citationsDiv.appendChild(list);
-            resultText.parentNode.appendChild(citationsDiv);
+            for (const line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const event = JSON.parse(line);
+                    handleStreamEvent(event);
+                } catch (err) {
+                    console.error('Failed to parse stream chunk', err, line);
+                }
+            }
         }
 
-        resultCard.classList.remove('hidden');
+        if (buffer.trim()) {
+            try {
+                const event = JSON.parse(buffer);
+                handleStreamEvent(event);
+            } catch (err) {
+                console.error('Failed to parse trailing chunk', err, buffer);
+            }
+        }
+    }
+
+    function handleStreamEvent(event) {
+        switch (event.type) {
+            case 'status':
+                updateSource(event.source);
+                shouldRefreshCache = event.source === 'CACHE_MISS';
+                resultCard.classList.remove('hidden');
+                break;
+            case 'token':
+                currentAnswer += event.text;
+                renderAnswer(currentAnswer);
+                resultCard.classList.remove('hidden');
+                break;
+            case 'metadata':
+                latestMetadata = event;
+                if (event.latency !== undefined) {
+                    resultLatency.textContent = `${Number(event.latency).toFixed(4)}s`;
+                }
+                if (event.source) {
+                    updateSource(event.source);
+                    shouldRefreshCache = event.source === 'CACHE_MISS';
+                }
+                if (event.similarity) {
+                    similarityScore.textContent = `Similarity: ${event.similarity}`;
+                }
+                if (event.answer && !currentAnswer) {
+                    currentAnswer = event.answer;
+                    renderAnswer(currentAnswer);
+                }
+                if (event.grounding_metadata) {
+                    renderCitations(event.grounding_metadata);
+                }
+                resultCard.classList.remove('hidden');
+                break;
+            case 'error':
+                alert(event.message || 'Generation failed');
+                break;
+            case 'done':
+                if (shouldRefreshCache) {
+                    fetchCache();
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    function renderAnswer(answerText) {
+        resultText.innerHTML = formatMarkdown(answerText);
+    }
+
+    function updateSource(source) {
+        if (!source) return;
+        resultSource.textContent = source.replace('_', ' ');
+        resultSource.className = 'source-badge ' + (source === 'CACHE_HIT' ? 'hit' : 'miss');
     }
 
     async function fetchCache() {
@@ -130,6 +198,31 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.error('Error clearing cache:', error);
         }
+    }
+
+    function renderCitations(metadata) {
+        clearCitations();
+        if (!metadata || !metadata.grounding_chunks || metadata.grounding_chunks.length === 0) return;
+
+        const citationsDiv = document.createElement('div');
+        citationsDiv.id = 'citations';
+        citationsDiv.className = 'mt-4 p-3 bg-gray-50 rounded text-sm';
+        citationsDiv.innerHTML = '<h4 class="font-semibold mb-2">Sources:</h4>';
+
+        const list = document.createElement('ul');
+        list.className = 'list-disc pl-5';
+        metadata.grounding_chunks.forEach(chunk => {
+            const li = document.createElement('li');
+            li.innerHTML = `<a href="${chunk.uri}" target="_blank" class="text-blue-600 hover:underline">${chunk.title || chunk.uri}</a>`;
+            list.appendChild(li);
+        });
+        citationsDiv.appendChild(list);
+        resultText.parentNode.appendChild(citationsDiv);
+    }
+
+    function clearCitations() {
+        const existingCitations = document.getElementById('citations');
+        if (existingCitations) existingCitations.remove();
     }
 
     // Simple Markdown formatter for bold text

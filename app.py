@@ -1,7 +1,8 @@
+import json
 import time
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from semantic_cache import SemanticCache
 from gemini_client import GeminiClient
@@ -14,6 +15,55 @@ gemini = GeminiClient()
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+def serialize_grounding_metadata(grounding_metadata):
+    """Convert grounding metadata into a JSON-serializable dict."""
+    if not grounding_metadata:
+        return {}
+    if isinstance(grounding_metadata, dict):
+        return grounding_metadata
+
+    processed_metadata = {}
+    try:
+        if hasattr(grounding_metadata, "web_search_queries"):
+            processed_metadata["web_search_queries"] = grounding_metadata.web_search_queries
+
+        if hasattr(grounding_metadata, "grounding_chunks"):
+            chunks = []
+            for chunk in grounding_metadata.grounding_chunks:
+                if hasattr(chunk, "web"):
+                    chunks.append({"uri": chunk.web.uri, "title": chunk.web.title})
+            if chunks:
+                processed_metadata["grounding_chunks"] = chunks
+
+        if hasattr(grounding_metadata, "grounding_supports"):
+            supports = []
+            for support in grounding_metadata.grounding_supports:
+                support_dict = {}
+                if hasattr(support, "segment"):
+                    support_dict["segment"] = {
+                        "text": support.segment.text,
+                        "start_index": support.segment.start_index,
+                        "end_index": support.segment.end_index,
+                    }
+                if hasattr(support, "grounding_chunk_indices"):
+                    support_dict["grounding_chunk_indices"] = support.grounding_chunk_indices
+                if support_dict:
+                    supports.append(support_dict)
+            if supports:
+                processed_metadata["grounding_supports"] = supports
+
+        if hasattr(grounding_metadata, "search_entry_point") and grounding_metadata.search_entry_point:
+            processed_metadata["search_entry_point"] = grounding_metadata.search_entry_point.rendered_content
+
+    except Exception as e:
+        print(f"Error processing metadata: {e}")
+
+    return processed_metadata
+
+def json_line(payload: dict) -> str:
+    """Return a JSON line suitable for streaming (NDJSON)."""
+    return json.dumps(payload, separators=(",", ":")) + "\n"
 
 class QueryRequest(BaseModel):
     question: str
@@ -59,19 +109,7 @@ async def ask_question(request: QueryRequest):
     cache.store(question, response_text)
     
     # Process metadata for response
-    processed_metadata = {}
-    if grounding_metadata:
-        try:
-            if hasattr(grounding_metadata, 'web_search_queries'):
-                processed_metadata['web_search_queries'] = grounding_metadata.web_search_queries
-            if hasattr(grounding_metadata, 'grounding_chunks'):
-                chunks = []
-                for chunk in grounding_metadata.grounding_chunks:
-                    if hasattr(chunk, 'web'):
-                        chunks.append({"uri": chunk.web.uri, "title": chunk.web.title})
-                processed_metadata['grounding_chunks'] = chunks
-        except Exception:
-            pass
+    processed_metadata = serialize_grounding_metadata(grounding_metadata)
 
     return {
         "answer": response_text,
@@ -90,6 +128,78 @@ async def get_cache():
 async def clear_cache():
     cache.clear_cache()
     return {"message": "Cache cleared"}
+
+# Token streaming endpoint (NDJSON)
+@app.post("/ask/stream")
+async def ask_question_stream(request: QueryRequest):
+    question = request.question.strip()
+    if not question:
+        return JSONResponse(status_code=400, content={"error": "Question cannot be empty"})
+
+    start_time = time.time()
+    cached_response = cache.check(question)
+
+    if cached_response:
+        latency = time.time() - start_time
+
+        def cache_hit_stream():
+            yield json_line(
+                {
+                    "type": "metadata",
+                    "source": "CACHE_HIT",
+                    "latency": latency,
+                    "similarity": "High (Threshold Met)",
+                }
+            )
+            yield json_line({"type": "token", "text": cached_response})
+            yield json_line({"type": "done"})
+
+        return StreamingResponse(cache_hit_stream(), media_type="application/x-ndjson")
+
+    def stream_from_model():
+        # Indicate early that we are generating a fresh response
+        yield json_line({"type": "status", "source": "CACHE_MISS"})
+
+        collected_chunks = []
+        final_grounding_metadata = {}
+
+        try:
+            for chunk in gemini.generate_content_stream(question, use_grounding=True):
+                text_chunk = getattr(chunk, "text", "") or ""
+                if text_chunk:
+                    collected_chunks.append(text_chunk)
+                    yield json_line({"type": "token", "text": text_chunk})
+
+                try:
+                    candidate = chunk.candidates[0] if getattr(chunk, "candidates", None) else None
+                    if candidate and getattr(candidate, "grounding_metadata", None):
+                        final_grounding_metadata = serialize_grounding_metadata(candidate.grounding_metadata)
+                except Exception as inner_exc:
+                    print(f"Error extracting grounding metadata: {inner_exc}")
+
+            answer_text = "".join(collected_chunks).strip()
+            if answer_text:
+                try:
+                    cache.store(question, answer_text)
+                except Exception as cache_error:
+                    print(f"Failed to store in cache: {cache_error}")
+
+            latency = time.time() - start_time
+            yield json_line(
+                {
+                    "type": "metadata",
+                    "source": "CACHE_MISS",
+                    "latency": latency,
+                    "similarity": "N/A",
+                    "grounding_metadata": final_grounding_metadata,
+                    "answer": answer_text,
+                }
+            )
+            yield json_line({"type": "done"})
+        except Exception as e:
+            yield json_line({"type": "error", "message": str(e)})
+
+    return StreamingResponse(stream_from_model(), media_type="application/x-ndjson")
 
 # Agent Integration
 from agent_graph import agent_app
