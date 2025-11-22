@@ -1,0 +1,7 @@
+redis
+google-cloud-aiplatform
+google-genai
+numpy
+fastapi
+uvicorn
+python-multipart

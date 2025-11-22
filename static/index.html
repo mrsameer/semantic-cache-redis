@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Cache | Redis & Gemini</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="background-glow"></div>
+    
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i class="fa-solid fa-layer-group"></i>
+                <h1>Semantic Cache</h1>
+            </div>
+            <div class="tech-stack">
+                <span class="badge redis"><i class="fa-solid fa-database"></i> Redis</span>
+                <span class="badge gemini"><i class="fa-solid fa-sparkles"></i> Gemini Vertex AI</span>
+            </div>
+        </header>
+
+        <main>
+            <section class="search-section">
+                <div class="search-container">
+                    <input type="text" id="questionInput" placeholder="Ask a question..." autocomplete="off">
+                    <button id="askBtn"><i class="fa-solid fa-paper-plane"></i></button>
+                </div>
+                
+                <div id="loadingIndicator" class="hidden">
+                    <div class="spinner"></div>
+                    <span>Generating response...</span>
+                </div>
+
+                <div id="resultCard" class="result-card hidden">
+                    <div class="result-header">
+                        <span id="resultSource" class="source-badge">CACHE HIT</span>
+                        <span id="resultLatency" class="latency">0.00s</span>
+                    </div>
+                    <div class="result-content">
+                        <p id="resultText"></p>
+                    </div>
+                    <div class="result-footer">
+                        <span id="similarityScore" class="similarity">Similarity: High</span>
+                    </div>
+                </div>
+            </section>
+
+            <section class="dashboard-section">
+                <div class="dashboard-header">
+                    <h2><i class="fa-solid fa-server"></i> Cache Dashboard</h2>
+                    <button id="refreshCacheBtn" class="icon-btn" title="Refresh"><i class="fa-solid fa-rotate-right"></i></button>
+                    <button id="clearCacheBtn" class="icon-btn danger" title="Clear Cache"><i class="fa-solid fa-trash"></i></button>
+                </div>
+                <div class="cache-stats">
+                    <div class="stat-item">
+                        <span class="stat-value" id="totalEntries">0</span>
+                        <span class="stat-label">Cached Entries</span>
+                    </div>
+                </div>
+                <div id="cacheList" class="cache-list">
+                    <!-- Cache items will be injected here -->
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
