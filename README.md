@@ -37,15 +37,15 @@ Includes a premium, dark-themed **Web Interface** to visualize cache hits, misse
 
 ```mermaid
 graph TD
-    User[User / Web UI] -->|Query| API[FastAPI Backend]
-    API -->|1. Check Cache| Cache[Semantic Cache (Redis)]
-    Cache -->|Vector Search| Redis[(Redis Stack)]
+    User["User / Web UI"] -->|Query| API["FastAPI Backend"]
+    API -->|"1. Check Cache"| Cache["Semantic Cache (Redis)"]
+    Cache -->|"Vector Search"| Redis[("Redis Stack")]
     
-    Redis -- Hit (Similarity > 0.9) --> API
-    Redis -- Miss --> LLM[Gemini Vertex AI]
+    Redis -- "Hit (Similarity > 0.9)" --> API
+    Redis -- Miss --> LLM["Gemini Vertex AI"]
     
-    LLM -->|Generate Response| API
-    API -->|Store Result| Redis
+    LLM -->|"Generate Response"| API
+    API -->|"Store Result"| Redis
     API -->|Response| User
 ```
 
