@@ -6,8 +6,8 @@ import redis
 from redis.commands.search.field import VectorField, TextField
 from redis.commands.search.index_definition import IndexDefinition, IndexType
 from redis.commands.search.query import Query
-import vertexai
-from vertexai.language_models import TextEmbeddingModel
+from google import genai
+from google.genai import types
 import config
 
 class SemanticCache:
@@ -15,9 +15,12 @@ class SemanticCache:
         # Set credentials
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(config.GOOGLE_APPLICATION_CREDENTIALS)
         
-        # Initialize Vertex AI
-        vertexai.init(project=config.PROJECT_ID, location=config.LOCATION)
-        self.embedding_model = TextEmbeddingModel.from_pretrained(config.EMBEDDING_MODEL_ID)
+        # Initialize Google GenAI Client
+        self.client = genai.Client(
+            vertexai=True,
+            project=config.PROJECT_ID,
+            location=config.LOCATION
+        )
         
         # Initialize Redis
         self.redis_client = redis.Redis.from_url(config.REDIS_URL)
@@ -47,18 +50,25 @@ class SemanticCache:
             self.redis_client.ft(config.INDEX_NAME).create_index(schema, definition=definition)
 
     def get_embedding(self, text: str) -> list[float]:
-        """Generates embedding for the given text using Vertex AI."""
-        from vertexai.language_models import TextEmbeddingInput
+        """Generates embedding for the given text using Google GenAI SDK."""
         
+        # Configure embedding request
         # Use SEMANTIC_SIMILARITY task type as recommended for retrieval/similarity
-        embedding_input = TextEmbeddingInput(text=text, task_type="SEMANTIC_SIMILARITY")
-        embeddings = self.embedding_model.get_embeddings([embedding_input])
+        embed_config = types.EmbedContentConfig(
+            task_type="SEMANTIC_SIMILARITY"
+        )
         
-        embedding_vector = np.array(embeddings[0].values, dtype=np.float32)
+        response = self.client.models.embed_content(
+            model=config.EMBEDDING_MODEL_ID,
+            contents=text,
+            config=embed_config
+        )
+        
+        # Extract embedding values
+        embedding_values = response.embeddings[0].values
+        embedding_vector = np.array(embedding_values, dtype=np.float32)
         
         # Explicitly normalize the embedding (L2 norm)
-        # Although 3072-dim embeddings from gemini-embedding-001 are often normalized,
-        # enforcing it ensures consistent cosine similarity calculations.
         norm = np.linalg.norm(embedding_vector)
         if norm > 0:
             embedding_vector = embedding_vector / norm
